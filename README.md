@@ -1,16 +1,233 @@
-# ⚡ LinkSnap - URL Shortener with Real-Time Analytics
+# ⚡ LinkSnap: Scalable URL Shortener & Real-Time Analytics Engine
 
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.5-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
-[![React](https://img.shields.io/badge/React-19-blue.svg?logo=react)](https://react.dev)
-[![Vite](https://img.shields.io/badge/Vite-8.3-646CFF.svg?logo=vite)](https://vitejs.dev)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791.svg?logo=postgresql)](https://www.postgresql.org)
-[![Railway](https://img.shields.io/badge/Deploy-Railway-0B0D0E.svg?logo=railway)](https://railway.app)
-[![Localhost Frontend](https://img.shields.io/badge/Localhost-Frontend%20(5173)-646CFF.svg?logo=vite)](http://localhost:5173)
-[![Localhost Backend](https://img.shields.io/badge/Localhost-Backend%20(8080)-6DB33F.svg?logo=springboot)](http://localhost:8080)
+[![CI Pipeline](https://github.com/sindesamith294/url-shortener-realtime-analytics/actions/workflows/ci.yml/badge.svg)](https://github.com/sindesamith294/url-shortener-realtime-analytics/actions/workflows/ci.yml)
+[![Java 21](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![React](https://img.shields.io/badge/React-19.3-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-8.3-646CFF?logo=vite&logoColor=white)](https://vitejs.dev)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> A modern, high-performance URL shortening platform with real-time click tracking, interactive analytics, JWT-based user authentication, and seamless Railway cloud deployment.
+> A production-grade URL shortening and click-stream analytics platform engineered with **Java 21**, **Spring Boot 3**, **React 19**, and **PostgreSQL**. Features sub-millisecond $O(1)$ redirection lookups, stateless JWT authentication, and real-time timeline data visualization.
 
-### 🔗 Local Development URLs
+---
+
+## 📑 Table of Contents
+- [Architecture Overview](#-architecture-overview)
+- [Key Engineering Decisions](#-key-engineering-decisions)
+- [Data Model & ER Diagram](#-data-model--er-diagram)
+- [Features](#-features)
+- [API Reference](#-api-reference)
+- [Local Development Setup](#-local-development-setup)
+- [Automated Testing & CI/CD](#-automated-testing--cicd)
+- [Production Deployment](#-production-deployment)
+- [License](#-license)
+
+---
+
+## 🏗️ Architecture Overview
+
+The system follows a clean, decoupled 3-tier architecture with an API gateway pattern and stateless token authorization:
+
+```mermaid
+graph TD
+    subgraph Client Tier
+        Browser["Web Browser (React 19 SPA)"]
+        PublicUser["Public Web Traffic"]
+    end
+
+    subgraph Application Tier
+        Vite["Vite Reverse Proxy (:5173)"]
+        SecurityFilter["Spring Security 6 (JwtAuthFilter)"]
+        AuthCtrl["AuthController (/api/auth)"]
+        UrlCtrl["UrlController (/api/urls)"]
+        RedirectCtrl["RedirectController (/{shortCode})"]
+        AnalyticsCtrl["AnalyticsService (/analytics)"]
+    end
+
+    subgraph Data Tier
+        Postgres[("PostgreSQL 16 Database")]
+        Index[("B-Tree Index on short_code")]
+    end
+
+    Browser -->|REST API Requests| Vite
+    Vite --> SecurityFilter
+    PublicUser -->|Click Short URL| RedirectCtrl
+    SecurityFilter --> AuthCtrl
+    SecurityFilter --> UrlCtrl
+    SecurityFilter --> AnalyticsCtrl
+
+    UrlCtrl --> Postgres
+    AnalyticsCtrl --> Postgres
+    RedirectCtrl -->|O(1) Lookup| Index
+    RedirectCtrl -->|302 Temporary Redirect| PublicUser
+    RedirectCtrl -.->|Async Click Event Logging| Postgres
+```
+
+---
+
+## 💡 Key Engineering Decisions
+
+### 1. $O(1)$ Redirection Lookup Strategy
+Redirect operations form >90% of traffic in URL shortening systems. To ensure sub-millisecond response times:
+- Unique B-Tree indexing is enforced directly on the `short_code` column in PostgreSQL.
+- URL lookups query exclusively indexed columns, bypassing full-table scans.
+- HTTP `302 Found` status is returned rather than `301 Moved Permanently` to ensure intermediate browser caches do not bypass analytics capture.
+
+### 2. Base62 Encoding vs. Hash Truncation
+Instead of standard MD5/SHA-256 truncation (which incurs collision probability requiring retry loops):
+- Unique short codes utilize alphanumeric Base62 charset (`[0-9a-zA-Z]`).
+- Generates compact 6-to-8 character paths providing over **$62^6 \approx 56.8 \text{ billion}$** unique URLs without collisions.
+- Supports customizable aliases with duplicate validation and structured exception handling.
+
+### 3. Stateless JWT Authentication & Security
+- Employs **JJWT 0.12.5** with HMAC-SHA256 signature verification.
+- Completely stateless backend session management (`SessionCreationPolicy.STATELESS`), allowing seamless horizontal autoscaling across multiple container instances.
+- Password hashing powered by **BCrypt** with adaptive workload factor.
+
+### 4. Database-Level Analytics Aggregation
+- Timeline analytics avoid in-memory filtering. Click events are aggregated directly in PostgreSQL using native date-truncation queries (`DATE(c.clicked_at)`).
+- Significantly lowers JVM heap memory usage and database wire payload sizes for URLs with tens of thousands of clicks.
+
+---
+
+## 🗄️ Data Model & ER Diagram
+
+```mermaid
+erDiagram
+    USERS ||--o{ SHORT_URLS : "creates"
+    SHORT_URLS ||--o{ CLICK_EVENTS : "tracks"
+
+    USERS {
+        bigint id PK
+        varchar email UK "Unique, Indexed"
+        varchar password "BCrypt Encrypted"
+        varchar role
+        timestamp created_at
+    }
+
+    SHORT_URLS {
+        bigint id PK
+        varchar short_code UK "Unique, B-Tree Indexed"
+        varchar original_url "Destination target"
+        bigint user_id FK
+        bigint click_count "Cached aggregate counter"
+        timestamp created_at
+    }
+
+    CLICK_EVENTS {
+        bigint id PK
+        bigint short_url_id FK
+        timestamp clicked_at "Indexed for time-series aggregation"
+        varchar ip_address
+        varchar user_agent
+        varchar referrer
+    }
+```
+
+---
+
+## ✨ Features
+
+- **⚡ Instant URL Shortening**: High-throughput shortening with automatic collision avoidance.
+- **🎯 Custom Branded Slugs**: Users can customize short links (e.g., `linksnap.app/custom-slug`).
+- **📊 Real-Time Interactive Analytics**:
+  - Daily click timeline visualizer powered by **Recharts**.
+  - Top-performing URLs ranked by total traffic volume.
+  - Granular audit trail capturing timestamps, referrers, and user agents.
+- **🛡️ Secure Access**: Granular user authorization ensures users can only inspect, edit, or delete their own shortened links.
+- **🎨 Glassmorphic Dark UI**: Tailored responsive dashboard built with React 19, Lucide React icons, and accessible component states.
+
+---
+
+## 🌐 API Reference
+
+### 🔐 Authentication Endpoints
+
+#### Register a New User
+```bash
+curl -X POST http://localhost:8080/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"dev@example.com","password":"StrongPassword123"}'
+```
+**Response (`200 OK`)**:
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsIn...",
+  "email": "dev@example.com"
+}
+```
+
+#### User Login
+```bash
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"dev@example.com","password":"StrongPassword123"}'
+```
+
+---
+
+### 🔗 URL Management Endpoints
+*(Requires `Authorization: Bearer <JWT_TOKEN>`)*
+
+#### Create Short URL
+```bash
+curl -X POST http://localhost:8080/api/urls \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "originalUrl": "https://github.com/sindesamith294/url-shortener-realtime-analytics",
+    "customCode": "linksnap-demo"
+  }'
+```
+**Response (`201 Created`)**:
+```json
+{
+  "id": 1,
+  "shortCode": "linksnap-demo",
+  "shortUrl": "http://localhost:8080/linksnap-demo",
+  "originalUrl": "https://github.com/sindesamith294/url-shortener-realtime-analytics",
+  "clickCount": 0,
+  "createdAt": "2026-10-21T08:00:00Z"
+}
+```
+
+#### Fetch Analytics for a URL
+```bash
+curl -X GET http://localhost:8080/api/urls/1/analytics \
+  -H "Authorization: Bearer <JWT_TOKEN>"
+```
+**Response (`200 OK`)**:
+```json
+{
+  "urlId": 1,
+  "shortCode": "linksnap-demo",
+  "totalClicks": 1420,
+  "dailyClicks": [
+    {"date": "2026-10-19", "clicks": 320},
+    {"date": "2026-10-20", "clicks": 540},
+    {"date": "2026-10-21", "clicks": 560}
+  ],
+  "recentClicks": [
+    {
+      "clickedAt": "2026-10-21T08:14:22Z",
+      "referrer": "https://linkedin.com",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
+  ]
+}
+```
+
+---
+
+## 🚀 Local Development Setup
+
+### Prerequisites
+- **JDK 21** or higher
+- **Node.js 18+** & npm
+- **PostgreSQL 14+** (Local test profile uses an automated in-memory H2 database)
+
+### Quick Development URLs
 | Service | Localhost URL | Notes |
 |:---|:---|:---|
 | **Frontend UI** | [http://localhost:5173](http://localhost:5173) | React 19 + Vite Web Application |
@@ -19,148 +236,67 @@
 
 ---
 
-## ✨ Features
-
-- **⚡ Fast URL Shortening**: Generate ultra-compact short URLs instantly with automatic unique code generation.
-- **🎯 Custom Aliases**: Create branded and human-readable custom back-halves for links.
-- **📊 Real-Time Analytics**:
-  - Total click volume and unique visitor tracking.
-  - Interactive daily click timeline charts powered by **Recharts**.
-  - Top performing URLs by total traffic.
-  - Recent click event audit trail with timestamps.
-- **🔒 Secure Authentication**:
-  - User registration and login protected with Spring Security & BCrypt password hashing.
-  - Stateless JWT token authorization with automated frontend interceptors.
-- **🎨 Modern Glassmorphic UI**:
-  - Sleek dark theme with micro-interactions, responsive navigation, and Lucide icons.
-  - One-click copy to clipboard with toast notifications.
-- **☁️ Cloud & Production Ready**:
-  - Pre-configured Nixpacks build configurations (`nixpacks.toml`, `railway.json`, `Procfile`) for one-click Railway deployments.
-  - PostgreSQL database support with automatic schema management.
-
----
-
-## 🛠️ Tech Stack
-
-### Backend
-- **Language**: Java 21
-- **Framework**: Spring Boot 3.2.5
-- **Security**: Spring Security 6 & JJWT 0.12.5
-- **Database / ORM**: Spring Data JPA & Hibernate with PostgreSQL
-- **Testing**: JUnit 5, H2 In-Memory DB, `@SpringBootTest` Integration Tests
-- **Build Tool**: Maven (`mvnw`)
-
-### Frontend
-- **Framework**: React 19 & Vite 8
-- **Routing**: React Router DOM v7
-- **Data Visualization**: Recharts
-- **Icons**: Lucide React
-- **HTTP Client**: Axios with interceptors
-- **Styling**: Vanilla CSS Design Tokens (Glassmorphic dark design)
-
----
-
-## 📁 Repository Structure
-
-```
-.
-├── backend/                             # Spring Boot 3 Java Backend
-│   ├── src/main/java/com/urlshortener/  # Application Controllers, Services, Entities & Security
-│   ├── src/main/resources/              # Configuration (application.properties, application-test.properties)
-│   ├── src/test/                        # Integration and unit tests
-│   ├── nixpacks.toml                    # Nixpacks build definition
-│   ├── pom.xml                          # Maven build dependencies
-│   └── railway.json                     # Railway deployment configuration
-├── frontend/                            # React 19 + Vite Frontend
-│   ├── src/api/                         # Axios client & API endpoints
-│   ├── src/components/                  # Navbar, Toast, & Reusable UI elements
-│   ├── src/context/                     # AuthContext state management
-│   ├── src/pages/                       # Landing, Login, Register, Dashboard, Analytics
-│   ├── package.json                     # Frontend dependencies
-│   └── vite.config.js                   # Vite configuration
-├── railway.json                         # Root Railway multi-service orchestrator
-└── README.md                            # Documentation
-```
-
----
-
-## 🚀 Getting Started Locally
-
-### Prerequisites
-- **JDK 21** or higher
-- **Node.js 18+** & npm
-- **PostgreSQL** (or run with default local fallback)
-
----
-
-### 1. Backend Setup
-
+### 1. Run Backend (Spring Boot 3)
 ```bash
 cd backend
 
-# Run with Maven Wrapper
-./mvnw clean spring-boot:run
+# Execute using Maven
+mvn clean spring-boot:run
 ```
-
-The Spring Boot backend will start on `http://localhost:8080`.
-
-> **Test Suite**: Run `mvn test` to execute all `@SpringBootTest` integration tests using the in-memory H2 database.
+*The Spring Boot server starts on `http://localhost:8080`.*
 
 ---
 
-### 2. Frontend Setup
-
+### 2. Run Frontend (React 19 + Vite)
 ```bash
 cd frontend
 
 # Install dependencies
 npm install
 
-# Start development server
+# Start Vite dev server with proxy enabled
 npm run dev
 ```
-
-The Vite frontend will be available at `http://localhost:5173`.
-
----
-
-## 🌐 API Reference
-
-### Authentication
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/auth/register` | Register new user account |
-| `POST` | `/api/auth/login` | Log in and receive JWT bearer token |
-
-### URL Management
-| Method | Endpoint | Description | Auth Required |
-|---|---|---|---|
-| `POST` | `/api/urls` | Create short URL (optional custom code) | Yes |
-| `GET` | `/api/urls` | List all URLs for authenticated user | Yes |
-| `PUT` | `/api/urls/{id}` | Update long URL destination | Yes |
-| `DELETE` | `/api/urls/{id}` | Delete a short URL | Yes |
-
-### Redirection & Analytics
-| Method | Endpoint | Description | Auth Required |
-|---|---|---|---|
-| `GET` | `/{shortCode}` | Redirect to original URL & log click | No |
-| `GET` | `/api/urls/{id}/analytics` | Get click stats, daily breakdown & recent visits | Yes |
+*The client application starts on `http://localhost:5173` with automated `/api` proxying.*
 
 ---
 
-## ☁️ Deployment
+## 🧪 Automated Testing & CI/CD
 
-This project is configured for seamless deployment on **[Railway](https://railway.app)**:
+The repository includes a comprehensive automated test suite and continuous integration pipeline:
 
-1. Push this repository to GitHub.
-2. Link the repository in your Railway project.
-3. Add a **PostgreSQL** plugin in Railway — `DATABASE_URL` will be automatically populated.
-4. Set optional environment variables:
-   - `JWT_SECRET`: A secure 256-bit secret string.
-   - `APP_BASE_URL`: Your deployed frontend/backend domain for generating full short links.
+- **Integration Testing**: Powered by `@SpringBootTest` and `@Transactional` rollbacks with in-memory H2 persistence (`UrlServiceIntegrationTest.java`).
+- **CI/CD Pipeline**: GitHub Actions workflow automatically builds, tests, and verifies both frontend and backend on every commit and pull request.
+
+```bash
+# Run backend test suite locally
+cd backend
+mvn test
+```
+
+---
+
+## ☁️ Production Deployment
+
+Configured for one-click deployment on **[Railway](https://railway.app)**:
+
+1. Connect this repository to your Railway project.
+2. Provision a **PostgreSQL** database service in Railway.
+3. Configure Environment Variables:
+   - `DATABASE_URL`: Automatically populated by Railway PostgreSQL plugin.
+   - `JWT_SECRET`: 256-bit secure key.
+   - `APP_BASE_URL`: Public domain URL for generating shortened links.
+   - `VITE_API_URL`: Backend public domain passed to frontend build.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is open-source and available under the [MIT License](LICENSE).
+
+---
+
+### 👨‍💻 Author & Contact
+**Samith Sinde**  
+GitHub: [@sindesamith294](https://github.com/sindesamith294)  
+Email: [sindesamith294@gmail.com](mailto:sindesamith294@gmail.com)

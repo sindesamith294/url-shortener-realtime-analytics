@@ -117,7 +117,7 @@ export default function AnalyticsPage() {
                     <tr key={i}>
                       <td style={{fontSize:".85rem",whiteSpace:"nowrap"}}>{fmt(c.clickedAt)}</td>
                       <td style={{fontSize:".83rem",color:"var(--muted)",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.referrer || "Direct"}</td>
-                      <td style={{fontSize:".78rem",color:"var(--muted)",maxWidth:280,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.userAgent || "—"}</td>
+                      <td style={{fontSize:".78rem",color:"var(--muted)",maxWidth:280,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.userAgent || "-"}</td>
                     </tr>
                   ))}
                 </tbody>

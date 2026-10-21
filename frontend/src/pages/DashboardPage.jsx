@@ -5,7 +5,7 @@ import Navbar from "../components/Navbar";
 import { useToast } from "../hooks/useToast";
 import { Copy, ExternalLink, BarChart2, Trash2, ToggleLeft, ToggleRight, Plus, Calendar } from "lucide-react";
 
-function fmt(dt) { return dt ? new Date(dt).toLocaleDateString() : "—"; }
+function fmt(dt) { return dt ? new Date(dt).toLocaleDateString() : "-"; }
 
 export default function DashboardPage() {
   const [urls, setUrls]         = useState([]);
