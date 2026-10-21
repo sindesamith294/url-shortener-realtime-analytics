@@ -5,9 +5,17 @@
 [![Vite](https://img.shields.io/badge/Vite-8.3-646CFF.svg?logo=vite)](https://vitejs.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791.svg?logo=postgresql)](https://www.postgresql.org)
 [![Railway](https://img.shields.io/badge/Deploy-Railway-0B0D0E.svg?logo=railway)](https://railway.app)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Localhost Frontend](https://img.shields.io/badge/Localhost-Frontend%20(5173)-646CFF.svg?logo=vite)](http://localhost:5173)
+[![Localhost Backend](https://img.shields.io/badge/Localhost-Backend%20(8080)-6DB33F.svg?logo=springboot)](http://localhost:8080)
 
 > A modern, high-performance URL shortening platform with real-time click tracking, interactive analytics, JWT-based user authentication, and seamless Railway cloud deployment.
+
+### 🔗 Local Development URLs
+| Service | Localhost URL | Notes |
+|:---|:---|:---|
+| **Frontend UI** | [http://localhost:5173](http://localhost:5173) | React 19 + Vite Web Application |
+| **Backend API** | [http://localhost:8080](http://localhost:8080) | Spring Boot REST API & Redirection |
+| **Health Check** | [http://localhost:8080/actuator/health](http://localhost:8080/actuator/health) | Backend Actuator Health Status |
 
 ---
 
